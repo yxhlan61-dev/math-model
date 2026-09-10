@@ -1,0 +1,25 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Temporary analysis previews, intermediate exports and local checks
+tmp/
+
+# Excel temporary lock files
+~$*.xlsx
+~$*.xls
+
+# IDE and operating-system files
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# External reference papers are kept locally and are not project deliverables
+参考文献_光伏与负载预测/
