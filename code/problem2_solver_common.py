@@ -236,6 +236,15 @@ def solve_daily_milp(
         raise ValueError("场景矩阵形状错误")
     if probabilities.shape != (scenario_count,) or abs(probabilities.sum() - 1.0) > 1e-12:
         raise ValueError("场景概率错误")
+    price_scenarios = np.asarray(price, dtype=float)
+    if price_scenarios.ndim == 1:
+        if price_scenarios.shape != (N,):
+            raise ValueError("电价向量形状错误")
+        price_scenarios = np.broadcast_to(price_scenarios, (scenario_count, N))
+    elif price_scenarios.shape != (scenario_count, N):
+        raise ValueError("电价场景矩阵形状错误")
+    if not np.isfinite(price_scenarios).all() or np.min(price_scenarios) < -CHECK_TOL:
+        raise ValueError("电价场景包含负值或非有限值")
 
     include_reserve_shortfall = terminal_soc is None and reserve_target is not None and reserve_penalty > 0.0
     idx, variable_count = _indices(scenario_count, include_reserve_shortfall)
@@ -249,9 +258,9 @@ def solve_daily_milp(
     reserve_shortfall = int(idx["reserve_shortfall"]) if include_reserve_shortfall else None
 
     objective = np.zeros(variable_count)
-    objective[purchase] = price
+    objective[purchase] = probabilities @ price_scenarios
     for s in range(scenario_count):
-        objective[emergency[s]] = probabilities[s] * 5.0 * price
+        objective[emergency[s]] = probabilities[s] * 5.0 * price_scenarios[s]
         objective[surplus[s]] = 0.0
     if reserve_shortfall is not None:
         objective[reserve_shortfall] = reserve_penalty
@@ -343,7 +352,7 @@ def solve_daily_milp(
 
     x = result.x
     emergency_values = x[emergency]
-    scenario_costs = emergency_values @ (5.0 * price)
+    scenario_costs = np.sum(emergency_values * (5.0 * price_scenarios), axis=1)
     reserve_shortfall_value = 0.0 if reserve_shortfall is None else float(x[reserve_shortfall])
     details = {}
     for name in ["mip_node_count", "mip_dual_bound", "mip_gap"]:

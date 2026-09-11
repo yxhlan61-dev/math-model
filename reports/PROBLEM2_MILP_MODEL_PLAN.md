@@ -454,6 +454,15 @@ G_d(t)+P_d(t)+D_d(t)-L_d(t)-C_d(t),0
 \right\}.
 \]
 
+实际富余电量可能同时包含无法消纳的计划购电和光伏电量。按计划购电不可退、富余时优先削减光伏的口径，实际弃光量定义为
+
+\[
+P_d^{\mathrm{curt}}(t)=
+\min\left\{P_d(t),W_d^{\mathrm{act}}(t)\right\}.
+\]
+
+全年弃光率取 \(\sum_{d,t}P_d^{\mathrm{curt}}(t)/\sum_{d,t}P_d(t)\)。
+
 当天实际费用为
 
 \[

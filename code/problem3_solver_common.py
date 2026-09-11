@@ -197,10 +197,20 @@ def solve_horizon_milp(
     time_limit_seconds: float = 120.0,
 ) -> HorizonSolution:
     S, T = load_scenarios.shape
-    if pv_scenarios.shape != (S, T) or price.shape != (T,) or probabilities.shape != (S,):
+    if pv_scenarios.shape != (S, T) or probabilities.shape != (S,):
         raise ValueError("滚动MILP输入维度不一致")
     if abs(float(probabilities.sum()) - 1.0) > 1e-12:
         raise ValueError("场景概率和不为1")
+    price_scenarios = np.asarray(price, dtype=float)
+    if price_scenarios.ndim == 1:
+        if price_scenarios.shape != (T,):
+            raise ValueError("滚动电价向量长度错误")
+        price_scenarios = np.broadcast_to(price_scenarios, (S, T))
+    elif price_scenarios.shape != (S, T):
+        raise ValueError("滚动电价场景矩阵形状错误")
+    if not np.isfinite(price_scenarios).all() or np.min(price_scenarios) < -CHECK_TOL:
+        raise ValueError("滚动电价场景包含负值或非有限值")
+    expected_price = probabilities @ price_scenarios
     adjusted = original_plan is not None
     if adjusted and original_plan.shape != (T,):
         raise ValueError("原计划长度与剩余时域不一致")
@@ -212,13 +222,13 @@ def solve_horizon_milp(
     objective = np.zeros(nvar)
     if adjusted:
         upward = idx["upward"]; downward = idx["downward"]
-        objective[upward] = 1.5 * price
-        objective[downward] = -0.5 * price
+        objective[upward] = 1.5 * expected_price
+        objective[downward] = -0.5 * expected_price
     else:
         upward = downward = None
-        objective[purchase] = price
+        objective[purchase] = expected_price
     for s in range(S):
-        objective[emergency[s]] = probabilities[s] * 5.0 * price
+        objective[emergency[s]] = probabilities[s] * 5.0 * price_scenarios[s]
     if include_reserve:
         objective[int(idx["reserve"])] = reserve_penalty
 
@@ -295,7 +305,9 @@ def solve_horizon_milp(
         mode=np.rint(x[mode]).astype(int), emergency_scenarios=scenario_emergency,
         surplus_scenarios=surplus_values, upward=upward_values, downward=downward_values,
         reserve_shortfall_kwh=reserve_value, reserve_penalty_yuan=reserve_penalty * reserve_value,
-        expected_emergency_cost_yuan=float(probabilities @ (scenario_emergency @ (5.0 * price))),
+        expected_emergency_cost_yuan=float(probabilities @ np.sum(
+            scenario_emergency * (5.0 * price_scenarios), axis=1
+        )),
         solve_seconds=elapsed, mip_gap=None if getattr(result, "mip_gap", None) is None else float(result.mip_gap),
     )
 

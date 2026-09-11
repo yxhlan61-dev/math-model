@@ -104,7 +104,8 @@ def main():
     # 功率和电价是10分钟区间平均值，横坐标使用区间中点；SOC另外补入0:00初值。
     interval_hours = (data.interval_id - 0.5) / 6
     soc_hours = np.arange(0, len(data.interval_id) + 1) / 6
-    tick_hours = np.arange(0, 25, 2)
+    # 与问题二、三、四的 24 小时时序图统一：0--24 h，每 3 h 一个主刻度。
+    tick_hours = np.arange(0, 25, 3)
     plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial Unicode MS"]
     plt.rcParams["axes.unicode_minus"] = False
     fig, axes = plt.subplots(2, 1, figsize=(10, 7.2), sharex=False, constrained_layout=True)
