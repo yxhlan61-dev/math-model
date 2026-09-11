@@ -13,6 +13,7 @@ tmp/
 # Excel temporary lock files
 ~$*.xlsx
 ~$*.xls
+*.inspect.ndjson
 
 # IDE and operating-system files
 .vscode/
