@@ -65,6 +65,8 @@ class DailySolution:
     expected_emergency_cost_yuan: float
     reserve_shortfall_kwh: float
     reserve_penalty_yuan: float
+    terminal_excess_kwh: float
+    terminal_excess_penalty_yuan: float
     solve_seconds: float
     solver_details: dict
 
@@ -204,7 +206,11 @@ def generate_scenarios(
     return load_scenarios, pv_scenarios, probabilities, sampled.tolist()
 
 
-def _indices(scenario_count: int, include_reserve_shortfall: bool) -> tuple[dict[str, np.ndarray | int], int]:
+def _indices(
+    scenario_count: int,
+    include_reserve_shortfall: bool,
+    include_terminal_excess: bool = False,
+) -> tuple[dict[str, np.ndarray | int], int]:
     cursor = 0
     result: dict[str, np.ndarray | int] = {}
     for name in ["purchase", "charge", "discharge", "soc", "mode"]:
@@ -216,6 +222,9 @@ def _indices(scenario_count: int, include_reserve_shortfall: bool) -> tuple[dict
     cursor += scenario_count * N
     if include_reserve_shortfall:
         result["reserve_shortfall"] = cursor
+        cursor += 1
+    if include_terminal_excess:
+        result["terminal_excess"] = cursor
         cursor += 1
     return result, cursor
 
@@ -229,6 +238,8 @@ def solve_daily_milp(
     terminal_soc: float | None,
     reserve_target: float | None = None,
     reserve_penalty: float = 0.0,
+    terminal_upper_target: float | None = None,
+    terminal_upper_penalty: float = 0.0,
     time_limit_seconds: float = 120.0,
 ) -> DailySolution:
     scenario_count = load_scenarios.shape[0]
@@ -247,7 +258,12 @@ def solve_daily_milp(
         raise ValueError("电价场景包含负值或非有限值")
 
     include_reserve_shortfall = terminal_soc is None and reserve_target is not None and reserve_penalty > 0.0
-    idx, variable_count = _indices(scenario_count, include_reserve_shortfall)
+    include_terminal_excess = (
+        terminal_soc is None
+        and terminal_upper_target is not None
+        and terminal_upper_penalty > 0.0
+    )
+    idx, variable_count = _indices(scenario_count, include_reserve_shortfall, include_terminal_excess)
     purchase = idx["purchase"]
     charge = idx["charge"]
     discharge = idx["discharge"]
@@ -256,6 +272,7 @@ def solve_daily_milp(
     emergency = idx["emergency"]
     surplus = idx["surplus"]
     reserve_shortfall = int(idx["reserve_shortfall"]) if include_reserve_shortfall else None
+    terminal_excess = int(idx["terminal_excess"]) if include_terminal_excess else None
 
     objective = np.zeros(variable_count)
     objective[purchase] = probabilities @ price_scenarios
@@ -264,6 +281,8 @@ def solve_daily_milp(
         objective[surplus[s]] = 0.0
     if reserve_shortfall is not None:
         objective[reserve_shortfall] = reserve_penalty
+    if terminal_excess is not None:
+        objective[terminal_excess] = terminal_upper_penalty
 
     lower = np.zeros(variable_count)
     upper = np.full(variable_count, np.inf)
@@ -332,6 +351,13 @@ def solve_daily_milp(
         values.extend([-1.0, -1.0])
         ub.append(-float(reserve_target)); row += 1
 
+    if terminal_excess is not None:
+        # B_end - terminal_upper_target <= V，即 B_end-V <= terminal_upper_target。
+        rows.extend([row, row])
+        cols.extend([int(soc[-1]), terminal_excess])
+        values.extend([1.0, -1.0])
+        ub.append(float(terminal_upper_target)); row += 1
+
     a_ub = coo_matrix((values, (rows, cols)), shape=(row, variable_count)).tocsr()
     constraints = [
         LinearConstraint(a_eq, np.asarray(eq_rhs), np.asarray(eq_rhs)),
@@ -354,6 +380,7 @@ def solve_daily_milp(
     emergency_values = x[emergency]
     scenario_costs = np.sum(emergency_values * (5.0 * price_scenarios), axis=1)
     reserve_shortfall_value = 0.0 if reserve_shortfall is None else float(x[reserve_shortfall])
+    terminal_excess_value = 0.0 if terminal_excess is None else float(x[terminal_excess])
     details = {}
     for name in ["mip_node_count", "mip_dual_bound", "mip_gap"]:
         value = getattr(result, name, None)
@@ -373,6 +400,8 @@ def solve_daily_milp(
         expected_emergency_cost_yuan=float(probabilities @ scenario_costs),
         reserve_shortfall_kwh=reserve_shortfall_value,
         reserve_penalty_yuan=reserve_penalty * reserve_shortfall_value,
+        terminal_excess_kwh=terminal_excess_value,
+        terminal_excess_penalty_yuan=terminal_upper_penalty * terminal_excess_value,
         solve_seconds=elapsed,
         solver_details=details,
     )

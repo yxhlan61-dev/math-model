@@ -81,11 +81,7 @@ const storageEnd = storageRows.length + 1;
 storageSheet.getRange(`A2:A${storageEnd}`).setNumberFormat("yyyy-mm-dd");
 storageSheet.getRange(`C2:D${storageEnd}`).format.numberFormat = "#,##0.000000";
 storageSheet.getRange(`F2:F${storageEnd}`).format.numberFormat = "#,##0.000000";
-storageSheet.getRange(`A1:F${storageEnd}`).format.font = { name: FONT, size: 9, color: "#222222" };
-styleHeader(storageSheet, "A1:F1");
-storageSheet.getRange("A:A").format.columnWidth = 14; storageSheet.getRange("B:B").format.columnWidth = 17;
-storageSheet.getRange("C:D").format.columnWidth = 16; storageSheet.getRange("E:E").format.columnWidth = 11;
-storageSheet.getRange("F:F").format.columnWidth = 16; storageSheet.freezePanes.freezeRows(1);
+storageSheet.getRange(`A2:F${storageEnd}`).format.font = { name: FONT, size: 9, color: "#222222" };
 
 const emergencyRows = [];
 let priorDate = null;
@@ -98,10 +94,7 @@ if (emergencyRows.length) emergencySheet.getRange("A2").write(emergencyRows);
 const emergencyEnd = Math.max(2, emergencyRows.length + 1);
 emergencySheet.getRange(`A2:A${emergencyEnd}`).setNumberFormat("yyyy-mm-dd");
 emergencySheet.getRange(`C2:C${emergencyEnd}`).format.numberFormat = "#,##0.000000";
-emergencySheet.getRange(`A1:C${emergencyEnd}`).format.font = { name: FONT, size: 9, color: "#222222" };
-styleHeader(emergencySheet, "A1:C1");
-emergencySheet.getRange("A:A").format.columnWidth = 14; emergencySheet.getRange("B:B").format.columnWidth = 25;
-emergencySheet.getRange("C:C").format.columnWidth = 18; emergencySheet.freezePanes.freezeRows(1);
+emergencySheet.getRange(`A2:C${emergencyEnd}`).format.font = { name: FONT, size: 9, color: "#222222" };
 
 await render(submission, "计划购电量", "A1:L8", "提交_计划购电量.png");
 await render(submission, "调整购电量", "A1:L8", "提交_调整购电量.png");

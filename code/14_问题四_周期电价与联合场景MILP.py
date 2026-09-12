@@ -40,6 +40,51 @@ POLICIES = {
 }
 OFFICIAL_POLICY = "S61218_全部四时点"
 SCENARIO_DRAWS = 30
+SOC_BASE = 7000.0
+SOC_AMPLITUDE = 800.0
+SOC_PHASE_DAY = 15.0
+SOC_BAND_HALF_WIDTH = 1000.0
+SOC_RISK_WINDOW = 56
+SOC_RISK_MIN_HISTORY = 7
+SOC_RISK_GAIN = 200.0
+SOC_RISK_CAP = 600.0
+
+
+def soc_reference(date: pd.Timestamp, risk_score: float, history: list[float]) -> dict:
+    seasonal = SOC_BASE + SOC_AMPLITUDE * np.cos(
+        2.0 * np.pi * (date.dayofyear - SOC_PHASE_DAY) / 365.0
+    )
+    hist = np.asarray(history[-SOC_RISK_WINDOW:], dtype=float)
+    if len(hist) < SOC_RISK_MIN_HISTORY:
+        median = float("nan"); scale = float("nan"); delta = 0.0
+    else:
+        median = float(np.median(hist))
+        scale = float(max(1.4826 * np.median(np.abs(hist - median)), 100.0))
+        delta = float(np.clip(SOC_RISK_GAIN * (risk_score - median) / scale, -SOC_RISK_CAP, SOC_RISK_CAP))
+    reference = float(np.clip(seasonal + delta, 5200.0, 8600.0))
+    return {"seasonal": float(seasonal), "risk_median": median, "risk_scale": scale,
+            "risk_delta": delta, "reference": reference,
+            "lower": reference - SOC_BAND_HALF_WIDTH, "upper": reference + SOC_BAND_HALF_WIDTH}
+
+
+def seed_problem2_risk_history(data, load_forecast, pv_forecast) -> list[float]:
+    history: list[float] = []
+    for day_index in range(1, 31):
+        load_s, pv_s, _, sampled_draws = generate_scenarios(data, day_index, load_forecast, pv_forecast)
+        load_s, pv_s, probabilities, _ = _compress_problem2_scenarios(load_s, pv_s, sampled_draws)
+        net = (load_s - pv_s).sum(axis=1)
+        history.append(float(np.quantile(net, 0.8) - probabilities @ net))
+    return history
+
+
+def seed_problem3_risk_history(data, load_forecast) -> list[float]:
+    history: list[float] = []
+    for day_index in range(1, 31):
+        load_s, pv_s, probabilities, _ = generate_horizon_scenarios(
+            data, day_index, 0, 0, load_forecast, scenario_count=SCENARIO_DRAWS)
+        net = (load_s - pv_s).sum(axis=1)
+        history.append(float(np.quantile(net, 0.8) - probabilities @ net))
+    return history
 
 
 def _compress_problem2_scenarios(load_s, pv_s, sampled):
@@ -83,24 +128,27 @@ def simulate_42(data, prices: PriceForecastData, load_forecast, pv_forecast,
     detail_rows, daily_rows = [], []
     maxima = _maxima()
     initial_soc = SOC_INITIAL
+    risk_history = seed_problem2_risk_history(data, load_forecast, pv_forecast)
     max_day = int(np.searchsorted(data.dates.values, np.datetime64(end_date), side="right"))
     for d in range(31, max_day):
         date = data.dates[d]
-        if d <= 30:
-            initial_soc = SOC_INITIAL
-        terminal_soc = SOC_INITIAL if d <= 29 else None
         load_s, pv_s, _, sampled_draws = generate_scenarios(data, d, load_forecast, pv_forecast)
         load_s, pv_s, probabilities, sampled = _compress_problem2_scenarios(load_s, pv_s, sampled_draws)
+        scenario_net = (load_s - pv_s).sum(axis=1)
+        risk_score = float(np.quantile(scenario_net, 0.8) - probabilities @ scenario_net)
+        soc_rule = soc_reference(pd.Timestamp(date), risk_score, risk_history)
+        risk_history.append(risk_score)
         if oracle:
             price_s = np.broadcast_to(prices.actual[d], load_s.shape)
         else:
             price_s = price_scenarios(prices, d, 0, 0, sampled)
         kappa = reserve_penalty(prices.actual, d, ETA_D)
         solution = solve_daily_milp(
-            price_s, load_s, pv_s, probabilities, initial_soc, terminal_soc,
-            reserve_target=RESERVE_TARGET, reserve_penalty=kappa,
+            price_s, load_s, pv_s, probabilities, initial_soc, None,
+            reserve_target=soc_rule["lower"], reserve_penalty=kappa,
+            terminal_upper_target=soc_rule["upper"], terminal_upper_penalty=kappa,
         )
-        check = validate_daily_solution(solution, price_s, load_s, pv_s, initial_soc, terminal_soc)
+        check = validate_daily_solution(solution, price_s, load_s, pv_s, initial_soc, None)
         if not check["feasible"]:
             raise RuntimeError(f"{date.date()} 问题4-2约束失败：{check}")
         _update_maxima(maxima, check)
@@ -134,6 +182,9 @@ def simulate_42(data, prices: PriceForecastData, load_forecast, pv_forecast,
             "充电量(kWh)": float(solution.charge.sum()), "放电量(kWh)": float(solution.discharge.sum()),
             "正常购电费(元)": plan_cost, "紧急购电费(元)": emergency_cost,
             "实际总费用(元)": plan_cost + emergency_cost, "日备不足惩罚系数": kappa,
+            "SOC季节基准(kWh)": soc_rule["seasonal"], "SOC风险分数(kWh)": risk_score,
+            "SOC每日微调(kWh)": soc_rule["risk_delta"], "SOC软区间下沿(kWh)": soc_rule["lower"],
+            "SOC软区间上沿(kWh)": soc_rule["upper"],
             "价格场景数": len(probabilities), "MIP相对间隙": solution.solver_details.get("mip_gap"),
         })
         maxima["max_abs_actual_balance_residual_kwh"] = max(
@@ -155,17 +206,22 @@ def simulate_43(data, prices: PriceForecastData, load_forecast, policy_name: str
     maxima = _maxima()
     max_day = int(np.searchsorted(base.dates.values, np.datetime64(end_date), side="right"))
     solve_count = 0
+    risk_history = seed_problem3_risk_history(data, load_forecast)
     for d in range(31, max_day):
         date = base.dates[d]
-        terminal_soc = SOC_INITIAL if d <= 29 else None
         kappa = reserve_penalty(prices.actual, d, ETA_D)
         load_s, pv_s, probabilities, sampled = generate_horizon_scenarios(
             data, d, 0, 0, load_forecast, scenario_count=SCENARIO_DRAWS)
+        scenario_net = (load_s - pv_s).sum(axis=1)
+        risk_score = float(np.quantile(scenario_net, 0.8) - probabilities @ scenario_net)
+        soc_rule = soc_reference(pd.Timestamp(date), risk_score, risk_history)
+        risk_history.append(risk_score)
         price_s = (np.broadcast_to(prices.actual[d], load_s.shape) if oracle
                    else price_scenarios(prices, d, 0, 0, sampled))
         plan = solve_horizon_milp(
-            price_s, load_s, pv_s, probabilities, initial_soc, terminal_soc,
-            reserve_target=RESERVE_TARGET, reserve_penalty=kappa,
+            price_s, load_s, pv_s, probabilities, initial_soc, None,
+            reserve_target=soc_rule["lower"], reserve_penalty=kappa,
+            terminal_upper_target=soc_rule["upper"], terminal_upper_penalty=kappa,
         )
         solve_count += 1
         checks = [(plan, load_s, pv_s, initial_soc, None)]
@@ -181,8 +237,9 @@ def simulate_43(data, prices: PriceForecastData, load_forecast, policy_name: str
             price_s = (np.broadcast_to(prices.actual[d, start:], load_s.shape) if oracle
                        else price_scenarios(prices, d, issue_hour, start, sampled))
             rolling = solve_horizon_milp(
-                price_s, load_s, pv_s, probabilities, rolling_initial, terminal_soc,
-                original_plan=original[start:], reserve_target=RESERVE_TARGET, reserve_penalty=kappa,
+                price_s, load_s, pv_s, probabilities, rolling_initial, None,
+                original_plan=original[start:], reserve_target=soc_rule["lower"], reserve_penalty=kappa,
+                terminal_upper_target=soc_rule["upper"], terminal_upper_penalty=kappa,
             )
             solve_count += 1
             checks.append((rolling, load_s, pv_s, rolling_initial, original[start:]))
@@ -228,6 +285,9 @@ def simulate_43(data, prices: PriceForecastData, load_forecast, policy_name: str
             "计划购电费(元)": plan_cost, "上调费用(元)": upward_cost, "下调抵扣(元)": downward_credit,
             "计划与调整结算费(元)": scheduled_cost, "紧急购电费(元)": emergency_cost,
             "实际总费用(元)": scheduled_cost + emergency_cost,
+            "SOC季节基准(kWh)": soc_rule["seasonal"], "SOC风险分数(kWh)": risk_score,
+            "SOC每日微调(kWh)": soc_rule["risk_delta"], "SOC软区间下沿(kWh)": soc_rule["lower"],
+            "SOC软区间上沿(kWh)": soc_rule["upper"],
             "6点调整量(kWh)": float(np.abs(purchase[36:] - original[36:]).sum()) if 6 in updates else 0.0,
             "12点调整量(kWh)": float(np.abs(purchase[72:] - original[72:]).sum()) if 12 in updates else 0.0,
             "18点调整量(kWh)": float(np.abs(purchase[108:] - original[108:]).sum()) if 18 in updates else 0.0,

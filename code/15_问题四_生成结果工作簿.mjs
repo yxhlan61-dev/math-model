@@ -79,11 +79,7 @@ async function makeSubmission(templateName, data, adjusted) {
   storage.getRange(`A2:A${storageEnd}`).setNumberFormat("yyyy-mm-dd");
   storage.getRange(`C2:D${storageEnd}`).format.numberFormat = "#,##0.000000";
   storage.getRange(`F2:F${storageEnd}`).format.numberFormat = "#,##0.000000";
-  storage.getRange(`A1:F${storageEnd}`).format.font = { name: FONT, size: 9, color: "#222222" };
-  header(storage, "A1:F1"); storage.freezePanes.freezeRows(1);
-  storage.getRange("A:A").format.columnWidth = 14; storage.getRange("B:B").format.columnWidth = 17;
-  storage.getRange("C:D").format.columnWidth = 16; storage.getRange("E:E").format.columnWidth = 11;
-  storage.getRange("F:F").format.columnWidth = 16;
+  storage.getRange(`A2:F${storageEnd}`).format.font = { name: FONT, size: 9, color: "#222222" };
 
   const emergency = workbook.worksheets.getItem("紧急购电量");
   const emergencyRows = [];
@@ -100,10 +96,7 @@ async function makeSubmission(templateName, data, adjusted) {
   const emergencyEnd = Math.max(2, emergencyRows.length + 1);
   emergency.getRange(`A2:A${emergencyEnd}`).setNumberFormat("yyyy-mm-dd");
   emergency.getRange(`C2:C${emergencyEnd}`).format.numberFormat = "#,##0.000000";
-  emergency.getRange(`A1:C${emergencyEnd}`).format.font = { name: FONT, size: 9, color: "#222222" };
-  header(emergency, "A1:C1"); emergency.freezePanes.freezeRows(1);
-  emergency.getRange("A:A").format.columnWidth = 14; emergency.getRange("B:B").format.columnWidth = 25;
-  emergency.getRange("C:C").format.columnWidth = 18;
+  emergency.getRange(`A2:C${emergencyEnd}`).format.font = { name: FONT, size: 9, color: "#222222" };
   return { workbook, storageEnd, emergencyEnd };
 }
 
@@ -139,7 +132,8 @@ summary.getRange("A2").values = [["问题四周期电价预测与联合场景MIL
 summary.getRange("A2:F2").format.font = { name: FONT, size: 14, bold: true, color: "#222222" };
 summary.getRange("A4:C4").values = [["方案", "实际总费用(元)", "紧急购电量(kWh)"]]; header(summary, "A4:C4");
 const summaryKeys = ["问题4-2_现实策略", "问题4-2_完全信息价格下界", `问题4-3_S61218_全部四时点`, "问题4-3_完全信息价格下界"];
-const summaryRows = summaryKeys.filter((key) => bundle.summaries[key]).map((key) => [
+const dynamicSummaryKeys = Object.keys(bundle.summaries).filter((key) => key.includes("4-2") || key.includes("4-3"));
+const summaryRows = dynamicSummaryKeys.filter((key) => bundle.summaries[key]).map((key) => [
   key, bundle.summaries[key]["实际总费用(元)"], bundle.summaries[key]["紧急购电量(kWh)"],
 ]);
 summary.getRange("A5").write(summaryRows); summary.getRange(`B5:C${summaryRows.length + 4}`).format.numberFormat = "#,##0.000000";
@@ -151,8 +145,9 @@ summary.getRange("A11").write(valueRows); summary.getRange("B11:B12").format.num
 summary.getRange("C11:C12").format.numberFormat = "0.0000%";
 summary.getRange("A15:D15").values = [["4-3更新策略", "实际总费用(元)", "相对仅0点节省(元)", "紧急购电量(kWh)"]]; header(summary, "A15:D15", GREEN);
 const policyKeys = ["问题4-3_S0_仅0点", "问题4-3_S6_增加6点", "问题4-3_S612_增加6点12点", "问题4-3_S61218_全部四时点"];
-const baseCost = bundle.summaries[policyKeys[0]]["实际总费用(元)"];
-const policyRows = policyKeys.map((key) => [
+const actualPolicyKeys = Object.keys(bundle.summaries).filter((key) => /4-3_S(0|6|612)/.test(key));
+const baseCost = bundle.summaries[actualPolicyKeys[0]]["实际总费用(元)"];
+const policyRows = actualPolicyKeys.map((key) => [
   key, bundle.summaries[key]["实际总费用(元)"], baseCost - bundle.summaries[key]["实际总费用(元)"],
   bundle.summaries[key]["紧急购电量(kWh)"],
 ]);

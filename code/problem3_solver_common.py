@@ -63,6 +63,8 @@ class HorizonSolution:
     downward: np.ndarray
     reserve_shortfall_kwh: float
     reserve_penalty_yuan: float
+    terminal_excess_kwh: float
+    terminal_excess_penalty_yuan: float
     expected_emergency_cost_yuan: float
     solve_seconds: float
     mip_gap: float | None
@@ -168,7 +170,8 @@ def generate_horizon_scenarios(
     return load_scenarios, pv_scenarios, probabilities, sampled.tolist()
 
 
-def _variable_indices(T: int, S: int, adjusted: bool, include_reserve: bool) -> tuple[dict, int]:
+def _variable_indices(T: int, S: int, adjusted: bool, include_reserve: bool,
+                      include_terminal_excess: bool) -> tuple[dict, int]:
     cursor = 0
     idx: dict[str, np.ndarray | int] = {}
     for name in ["purchase", "charge", "discharge", "soc", "mode"]:
@@ -181,6 +184,8 @@ def _variable_indices(T: int, S: int, adjusted: bool, include_reserve: bool) -> 
         idx["downward"] = np.arange(cursor, cursor + T, dtype=int); cursor += T
     if include_reserve:
         idx["reserve"] = cursor; cursor += 1
+    if include_terminal_excess:
+        idx["terminal_excess"] = cursor; cursor += 1
     return idx, cursor
 
 
@@ -194,6 +199,8 @@ def solve_horizon_milp(
     original_plan: np.ndarray | None = None,
     reserve_target: float | None = RESERVE_TARGET,
     reserve_penalty: float = RESERVE_PENALTY,
+    terminal_upper_target: float | None = None,
+    terminal_upper_penalty: float = 0.0,
     time_limit_seconds: float = 120.0,
 ) -> HorizonSolution:
     S, T = load_scenarios.shape
@@ -215,7 +222,8 @@ def solve_horizon_milp(
     if adjusted and original_plan.shape != (T,):
         raise ValueError("原计划长度与剩余时域不一致")
     include_reserve = terminal_soc is None and reserve_target is not None and reserve_penalty > 0
-    idx, nvar = _variable_indices(T, S, adjusted, include_reserve)
+    include_terminal_excess = terminal_soc is None and terminal_upper_target is not None and terminal_upper_penalty > 0
+    idx, nvar = _variable_indices(T, S, adjusted, include_reserve, include_terminal_excess)
     purchase = idx["purchase"]; charge = idx["charge"]; discharge = idx["discharge"]
     soc = idx["soc"]; mode = idx["mode"]; emergency = idx["emergency"]
 
@@ -231,6 +239,8 @@ def solve_horizon_milp(
         objective[emergency[s]] = probabilities[s] * 5.0 * price_scenarios[s]
     if include_reserve:
         objective[int(idx["reserve"])] = reserve_penalty
+    if include_terminal_excess:
+        objective[int(idx["terminal_excess"])] = terminal_upper_penalty
 
     lower = np.zeros(nvar)
     upper = np.full(nvar, np.inf)
@@ -275,6 +285,9 @@ def solve_horizon_milp(
     if include_reserve:
         ub_rows.extend([row_ub, row_ub]); ub_cols.extend([int(soc[-1]), int(idx["reserve"])])
         ub_values.extend([-1.0, -1.0]); ub_rhs.append(-float(reserve_target)); row_ub += 1
+    if include_terminal_excess:
+        ub_rows.extend([row_ub, row_ub]); ub_cols.extend([int(soc[-1]), int(idx["terminal_excess"])])
+        ub_values.extend([1.0, -1.0]); ub_rhs.append(float(terminal_upper_target)); row_ub += 1
     a_ub = coo_matrix((ub_values, (ub_rows, ub_cols)), shape=(row_ub, nvar)).tocsr()
     constraints = [
         LinearConstraint(a_eq, np.asarray(eq_rhs), np.asarray(eq_rhs)),
@@ -291,6 +304,7 @@ def solve_horizon_milp(
     upward_values = np.zeros(T) if not adjusted else x[upward]
     downward_values = np.zeros(T) if not adjusted else x[downward]
     reserve_value = 0.0 if not include_reserve else float(x[int(idx["reserve"])])
+    terminal_excess_value = 0.0 if not include_terminal_excess else float(x[int(idx["terminal_excess"])])
     scenario_emergency = x[emergency]
     purchase_values = x[purchase]
     charge_values = x[charge]
@@ -305,6 +319,8 @@ def solve_horizon_milp(
         mode=np.rint(x[mode]).astype(int), emergency_scenarios=scenario_emergency,
         surplus_scenarios=surplus_values, upward=upward_values, downward=downward_values,
         reserve_shortfall_kwh=reserve_value, reserve_penalty_yuan=reserve_penalty * reserve_value,
+        terminal_excess_kwh=terminal_excess_value,
+        terminal_excess_penalty_yuan=terminal_upper_penalty * terminal_excess_value,
         expected_emergency_cost_yuan=float(probabilities @ np.sum(
             scenario_emergency * (5.0 * price_scenarios), axis=1
         )),

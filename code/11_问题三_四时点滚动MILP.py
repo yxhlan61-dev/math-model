@@ -40,6 +40,30 @@ POLICIES = {
 }
 OFFICIAL_POLICY = "S61218_全部四时点"
 SELECTED_DATE = pd.Timestamp("2025-03-20")
+SOC_BASE = 7000.0
+SOC_AMPLITUDE = 800.0
+SOC_PHASE_DAY = 15.0
+SOC_BAND_HALF_WIDTH = 1000.0
+SOC_RISK_WINDOW = 56
+SOC_RISK_MIN_HISTORY = 7
+SOC_RISK_GAIN = 200.0
+SOC_RISK_CAP = 600.0
+
+
+def soc_reference(date: pd.Timestamp, risk_score: float, history: list[float]) -> dict:
+    seasonal = SOC_BASE + SOC_AMPLITUDE * np.cos(
+        2.0 * np.pi * (date.dayofyear - SOC_PHASE_DAY) / 365.0
+    )
+    hist = np.asarray(history[-SOC_RISK_WINDOW:], dtype=float)
+    median = float(np.median(hist)) if len(hist) >= SOC_RISK_MIN_HISTORY else float("nan")
+    scale = float(max(1.4826 * np.median(np.abs(hist - median)), 100.0)) if len(hist) >= SOC_RISK_MIN_HISTORY else float("nan")
+    delta = 0.0 if len(hist) < SOC_RISK_MIN_HISTORY else float(np.clip(
+        SOC_RISK_GAIN * (risk_score - median) / scale, -SOC_RISK_CAP, SOC_RISK_CAP
+    ))
+    reference = float(np.clip(seasonal + delta, 5200.0, 8600.0))
+    return {"seasonal": float(seasonal), "risk_median": median, "risk_scale": scale,
+            "risk_delta": delta, "reference": reference,
+            "lower": reference - SOC_BAND_HALF_WIDTH, "upper": reference + SOC_BAND_HALF_WIDTH}
 
 
 def configure_plotting() -> None:
@@ -84,17 +108,22 @@ def simulate_policy(data, load_forecast: np.ndarray, policy_name: str, updates: 
         "max_mip_gap": 0.0,
     }
     solve_count = 0
+    risk_history: list[float] = []
     max_day = int(np.searchsorted(base.dates.values, np.datetime64(end_date), side="right"))
 
     for d in range(1, max_day):
         date = base.dates[d]
-        terminal_soc = SOC_INITIAL if d <= 29 else None
         load_s, pv_s, probabilities, sampled = generate_horizon_scenarios(
             data, d, 0, 0, load_forecast, SCENARIO_COUNT
         )
+        scenario_net = (load_s - pv_s).sum(axis=1)
+        risk_score = float(np.quantile(scenario_net, 0.8) - probabilities @ scenario_net)
+        soc_rule = soc_reference(pd.Timestamp(date), risk_score, risk_history)
+        risk_history.append(risk_score)
         plan_solution = solve_horizon_milp(
-            price, load_s, pv_s, probabilities, initial_soc, terminal_soc,
-            original_plan=None, reserve_target=RESERVE_TARGET, reserve_penalty=RESERVE_PENALTY,
+            price, load_s, pv_s, probabilities, initial_soc, None,
+            original_plan=None, reserve_target=soc_rule["lower"], reserve_penalty=RESERVE_PENALTY,
+            terminal_upper_target=soc_rule["upper"], terminal_upper_penalty=RESERVE_PENALTY,
         )
         solve_count += 1
         check_list = [(plan_solution, load_s, pv_s, initial_soc, None)]
@@ -113,9 +142,10 @@ def simulate_policy(data, load_forecast: np.ndarray, policy_name: str, updates: 
                 data, d, issue_hour, start, load_forecast, SCENARIO_COUNT
             )
             rolling = solve_horizon_milp(
-                price[start:], load_s, pv_s, probabilities, rolling_initial_soc, terminal_soc,
-                original_plan=original_plan[start:], reserve_target=RESERVE_TARGET,
+                price[start:], load_s, pv_s, probabilities, rolling_initial_soc, None,
+                original_plan=original_plan[start:], reserve_target=soc_rule["lower"],
                 reserve_penalty=RESERVE_PENALTY,
+                terminal_upper_target=soc_rule["upper"], terminal_upper_penalty=RESERVE_PENALTY,
             )
             solve_count += 1
             check_list.append((rolling, load_s, pv_s, rolling_initial_soc, original_plan[start:]))
@@ -176,6 +206,9 @@ def simulate_policy(data, load_forecast: np.ndarray, policy_name: str, updates: 
             "上调费用(元)": upward_cost, "下调抵扣(元)": downward_credit,
             "计划与调整结算费(元)": scheduled_cost, "紧急购电费(元)": emergency_cost,
             "实际总费用(元)": total_cost,
+            "SOC季节基准(kWh)": soc_rule["seasonal"], "SOC风险分数(kWh)": risk_score,
+            "SOC每日微调(kWh)": soc_rule["risk_delta"], "SOC软区间下沿(kWh)": soc_rule["lower"],
+            "SOC软区间上沿(kWh)": soc_rule["upper"],
             "6点调整量(kWh)": float(np.sum(np.abs(executed_purchase[source_issue == 6] - original_plan[source_issue == 6]))),
             "12点调整量(kWh)": float(np.sum(np.abs(executed_purchase[source_issue == 12] - original_plan[source_issue == 12]))),
             "18点调整量(kWh)": float(np.sum(np.abs(executed_purchase[source_issue == 18] - original_plan[source_issue == 18]))),
@@ -212,7 +245,7 @@ def summarize_policy(daily: pd.DataFrame) -> dict:
     result = {column: float(official[column].sum()) for column in sum_columns}
     result.update({
         "正式天数": int(len(official)), "平均日末储电量(kWh)": float(official["日末储电量(kWh)"].mean()),
-        "日末低于6000kWh天数": int((official["日末储电量(kWh)"] < RESERVE_TARGET - CHECK_TOL).sum()),
+        "日末低于SOC软区间下沿天数": int((official["日末储电量(kWh)"] < official["SOC软区间下沿(kWh)"] - CHECK_TOL).sum()),
         "发生紧急购电天数": int((official["紧急购电量(kWh)"] > CHECK_TOL).sum()),
         "6点发生调整天数": int((official["6点调整量(kWh)"] > CHECK_TOL).sum()),
         "12点发生调整天数": int((official["12点调整量(kWh)"] > CHECK_TOL).sum()),
