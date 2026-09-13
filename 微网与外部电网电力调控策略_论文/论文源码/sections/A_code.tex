@@ -1,0 +1,152 @@
+\vspace{1.1em}
+
+本节给出各问题求解程序的核心代码片段，完整程序见随论文提交的源码文件。
+
+\vspace{0.6em}
+{\heiti\bfseries （1）问题一：电力平衡、储能递推与充放电互斥约束构建}
+
+\begin{lstlisting}[language=Python]
+N, DT, SOC_MIN, SOC_MAX = 144, 1/6, 1200.0, 10800.0
+SOC_INITIAL = SOC_TERMINAL = 6000.0
+ENERGY_MAX = 5000.0 * DT          # 833.333333 kWh
+ETA_C = ETA_D = 0.9
+
+# variables: purchase | charge | discharge | soc | curtailment ( | mode )
+# power balance: G - C + D - W = L - P
+for t in range(N):
+    for col, val in [(purchase[t], 1.0), (charge[t], -1.0),
+                     (discharge[t], 1.0), (curtailment[t], -1.0)]:
+        add_eq(row, col, val)
+    rhs.append(load_kwh[t] - pv_kwh[t])
+
+# storage recursion: B_t - B_{t-1} - eta_c*C_t + D_t/eta_d = 0
+for t in range(N):
+    terms = [(soc[t], 1.0), (charge[t], -ETA_C), (discharge[t], 1.0/ETA_D)]
+    if t > 0:
+        terms.append((soc[t-1], -1.0))
+    for col, val in terms:
+        add_eq(row, col, val)
+    rhs.append(SOC_INITIAL if t == 0 else 0.0)
+
+# terminal condition B_144 = B_0
+add_eq(row, soc[-1], 1.0); rhs.append(SOC_TERMINAL)
+
+# MILP only: mutual exclusion C_t <= Emax*z_t, D_t <= Emax*(1-z_t)
+for t in range(N):
+    add_ub(charge[t], 1.0);  add_ub(mode[t], -ENERGY_MAX); ub.append(0.0)
+    add_ub(discharge[t], 1.0); add_ub(mode[t], ENERGY_MAX); ub.append(ENERGY_MAX)
+
+objective = np.zeros(nvar); objective[purchase] = price
+integrality = np.zeros(nvar, dtype=int); integrality[mode] = 1
+result = milp(objective, integrality=integrality, bounds=Bounds(lower, upper),
+              constraints=[LinearConstraint(a_eq, b_eq, b_eq),
+                           LinearConstraint(a_ub, -np.inf, ub)],
+              options={"mip_rel_gap": 0.0, "presolve": True})
+\end{lstlisting}
+
+\vspace{0.6em}
+{\heiti\bfseries （2）问题二：周期加权预测与整日联合残差场景}
+
+\begin{lstlisting}[language=Python]
+RHO = 0.8
+
+def exponential_weights(k):
+    w = RHO ** np.arange(k, dtype=float)
+    return w / w.sum()
+
+# load: last min(4, floor((d-1)/7)) same-weekday samples
+k = min(4, (day - 1) // 7)
+indices = day - 7 * np.arange(1, k + 1)
+load_hat = np.maximum(np.average(load[indices], axis=0,
+                                 weights=exponential_weights(k)), 0.0)
+
+# joint residual sampling: whole 144-step daily blocks, same historical date
+omega = 0.98 ** (day - r) * (1.0 + (weekday[day] == weekday[r]))
+prob = omega / omega.sum()
+chosen = rng.choice(len(history), size=S, p=prob)      # S = 100
+load_scen = np.maximum(load_hat[None, :] + resid_L[chosen], 0.0)
+pv_scen = np.minimum(pv_max_observed,
+                     np.maximum(pv_hat[None, :] + resid_P[chosen], 0.0))
+\end{lstlisting}
+
+\vspace{0.6em}
+{\heiti\bfseries （3）问题二：季节余弦终端软区间与因果风险微调}
+
+\begin{lstlisting}[language=Python]
+SOC_BASE, SOC_AMP, PHASE_DAY = 7000.0, 800.0, 15.0
+BAND_HALF, RISK_GAIN, RISK_CAP = 1000.0, 200.0, 600.0
+RISK_WINDOW, RISK_FLOOR = 56, 100.0
+
+def seasonal_reference(date):
+    return SOC_BASE + SOC_AMP * np.cos(
+        2.0 * np.pi * (date.dayofyear - PHASE_DAY) / 365.0)
+
+# risk score: 80th percentile minus mean of the daily net-load scenario total
+score = np.quantile(net_total, 0.80) - net_total.mean()
+
+# causal window: only days strictly before the current decision day
+hist = scores[max(0, day - RISK_WINDOW):day]
+median = float(np.median(hist))
+scale = max(1.4826 * np.median(np.abs(hist - median)), RISK_FLOOR)
+adj = np.clip(RISK_GAIN * (score - median) / scale, -RISK_CAP, RISK_CAP)
+
+ref = float(np.clip(seasonal_reference(date) + adj, 5200.0, 8600.0))
+lower, upper = ref - BAND_HALF, ref + BAND_HALF    # double-sided soft band
+\end{lstlisting}
+
+\vspace{0.6em}
+{\heiti\bfseries （4）问题三：日内滚动调整的调整恒等式、目标函数与缺口不等式}
+
+\begin{lstlisting}[language=Python]
+# adjustment identity A_t - G_t = U_t - V_t  (net settlement)
+for t in range(T):
+    for col, val in [(purchase[t], 1.0), (upward[t], -1.0), (downward[t], 1.0)]:
+        add_eq(row, col, val)
+    rhs.append(original_plan[t])
+
+# rolling objective on the remaining horizon
+objective[upward]   =  1.5 * expected_price
+objective[downward] = -0.5 * expected_price
+for s in range(S):
+    objective[emergency[s]] = prob[s] * 5.0 * price_scenarios[s]
+objective[reserve] = RESERVE_PENALTY            # 1.1250 yuan/kWh, both bands
+
+# scenario deficit H >= L - P + C - D - A; surplus W is recovered afterwards
+# by its positive part, which keeps the feasible region unchanged.
+for s in range(S):
+    for t in range(T):
+        add_ub(purchase[t], -1.0); add_ub(emergency[s, t], -1.0)
+        add_ub(discharge[t], -1.0); add_ub(charge[t], 1.0)
+        ub.append(-(load_scen[s, t] - pv_scen[s, t]))
+\end{lstlisting}
+
+\vspace{0.6em}
+{\heiti\bfseries （5）问题四：固定指数周期电价预测与因果门控残差更新}
+
+\begin{lstlisting}[language=Python]
+AR_LAGS = [1, 2, 3, 6, 12, 18, 36, 72, 144]
+ALPHA_GRID = [0.1, 1, 10, 20, 50, 100]
+
+def causal_day_ahead_forecast(actual):
+    forecast = np.full_like(actual, np.nan)
+    for day in range(1, min(7, len(actual))):
+        forecast[day] = actual[day - 1]           # warm-up only
+    for day in range(7, len(actual)):
+        k = min(4, day // 7)
+        w = exponential_weights(k)
+        idx = day - 7 * np.arange(1, k + 1)
+        forecast[day] = np.maximum(np.average(actual[idx], axis=0, weights=w), 0.0)
+    return forecast
+
+# monthly causal gate: enable ridge residual update only on validated issue hours
+for month in range(2, 13):
+    cutoff = first_day_of_month[month]
+    for i, issue_hour in enumerate([6, 12, 18], start=1):
+        valid = np.arange(max(7, cutoff - 7), cutoff)
+        gate_model, _ = fit_causal_ridge(flat, valid[0] * N)
+        base_mae, update_mae = evaluate_on(valid, base, gate_model, start=issue_hour*6)
+        use_update = update_mae < base_mae
+        model, alpha = fit_causal_ridge(flat, cutoff * N)
+        if use_update:
+            issue_forecast[month_days, i, start:] = periodic_base + residual_hat
+\end{lstlisting}

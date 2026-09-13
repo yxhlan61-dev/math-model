@@ -1,0 +1,231 @@
+% !TEX program = xelatex
+% =============================================================================
+%  全国大学生数学建模竞赛（CUMCM）LaTeX 模板
+%  对应 Typst 模板 zh/cumcm/main.typ 的全部功能。
+%
+%  字体依赖（正文宋体 / 标题黑体 / 强调楷体）：
+%    - 规范字体：SimSun（宋体）、SimHei（黑体）、KaiTi（楷体）。
+%    - 本模板默认使用 ctex 的 fontset=mac，在 macOS 上自动选用同族等价字体
+%      Songti SC / Heiti SC / Kaiti SC，确保开箱即用。
+%    - 若系统已安装 SimSun/SimHei/KaiTi（如 Windows 或手动安装），可将下方
+%      \documentclass 选项 fontset=mac 改为 fontset=windows，即可使用规范字体。
+%    - 西文正文：Times New Roman；代码等宽：Menlo（缺失时回退到默认字体）。
+%  编译方式：xelatex main.tex （需运行两遍以生成目录）
+% =============================================================================
+\documentclass[fontset=windows, 12pt, a4paper]{ctexart}
+
+% ---------- 页面：A4，上下左右 2.5cm ----------
+\usepackage[a4paper, top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+
+% ---------- 数学 ----------
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+
+% ---------- 图注：小一号字、更小间距 ----------
+\usepackage{caption}
+\captionsetup{font=small, skip=4pt}
+
+% ---------- 浮动体控制：每页至多一张图，章末强制清空浮动队列 ----------
+\usepackage{placeins}
+\AtBeginDocument{%
+  \setcounter{topnumber}{1}%
+  \setcounter{bottomnumber}{0}%
+  \setcounter{totalnumber}{1}%
+  \renewcommand{\topfraction}{0.95}%
+  \renewcommand{\bottomfraction}{0.9}%
+  \renewcommand{\textfraction}{0.05}%
+  \renewcommand{\floatpagefraction}{0.95}%
+}
+
+% ---------- 字体（fontspec + ctex，xelatex 编译） ----------
+% 中文宋体/黑体/楷体由 ctex 的 fontset=mac 自动设置（Songti SC / Heiti SC / Kaiti SC），
+% 并自动定义 \songti / \heiti / \kaishu 等字体命令。
+% 西文正文与代码等宽字体：
+\IfFontExistsTF{Times New Roman}{\setmainfont{Times New Roman}}{}
+\IfFontExistsTF{Menlo}{\setmonofont{Menlo}}{}
+
+% ---------- 正文：12pt，首行缩进 2em，两端对齐，行距约 1.38 倍 ----------
+% \linespread{1.15} 对应行高约 1.38 倍字号
+\linespread{1.15}
+\setlength{\parindent}{2em}
+\setlength{\emergencystretch}{2em}
+
+% ---------- 公式上下间距收紧（不影响可读性） ----------
+\AtBeginDocument{%
+  \setlength{\abovedisplayskip}{4pt plus 2pt minus 2pt}%
+  \setlength{\belowdisplayskip}{4pt plus 2pt minus 2pt}%
+  \setlength{\abovedisplayshortskip}{2pt plus 2pt}%
+  \setlength{\belowdisplayshortskip}{3pt plus 2pt minus 2pt}%
+}
+
+% ---------- 标题编号（\ctexset 配置） ----------
+% 一级标题用中文数字“一、二、三、”，二级及以下用 1.1 / 1.1.1
+\ctexset{
+  section/number       = \chinese{section},
+  subsection/number    = \arabic{section}.\arabic{subsection},
+  subsubsection/number = \arabic{section}.\arabic{subsection}.\arabic{subsubsection},
+}
+
+% ---------- 标题格式（titlesec 配置） ----------
+\usepackage{titlesec}
+\titleformat{\section}
+  {\centering\fontsize{17.3pt}{20.8pt}\heiti\bfseries}
+  {\chinese{section}、}{1em}{}
+\titleformat{\subsection}
+  {\fontsize{14.45pt}{17.4pt}\heiti\bfseries}
+  {\arabic{section}.\arabic{subsection}}{1em}{}
+\titleformat{\subsubsection}
+  {\fontsize{12.05pt}{14.5pt}\heiti\bfseries}
+  {\arabic{section}.\arabic{subsection}.\arabic{subsubsection}}{1em}{}
+\titlespacing{\section}       {0pt}{1.0em}{0.6em}
+\titlespacing{\subsection}    {0pt}{0.85em}{0.4em}
+\titlespacing{\subsubsection} {0pt}{0.85em}{0.4em}
+
+% ---------- 目录（tocloft 点线引导） ----------
+\usepackage{tocloft}
+\renewcommand{\cftsecfont}{\heiti\bfseries}
+\renewcommand{\cftsecpagefont}{\heiti\bfseries}
+\renewcommand{\cftsecleader}{\cftdotfill{\cftdotsep}}
+\renewcommand{\cftsubsecleader}{\cftdotfill{\cftdotsep}}
+\renewcommand{\cftsubsubsecleader}{\cftdotfill{\cftdotsep}}
+
+% ---------- 表格与代码 ----------
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{xcolor}
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{black!3},
+  frame=single,
+  framesep=6pt,
+  xleftmargin=8pt,
+  xrightmargin=8pt,
+  rulecolor=\color{black!30},
+  framerule=0.8pt,
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+}
+
+% ---------- 页码：底部居中 ----------
+\pagestyle{plain}
+
+% ---------- 自定义命令（对应 Typst 函数） ----------
+% \papertitle{标题}：居中 17.3pt 加粗标题
+\newcommand{\papertitle}[1]{%
+  \thispagestyle{empty}%
+  \begin{center}
+    {\fontsize{17.3pt}{22pt}\bfseries #1}
+  \end{center}
+  \vspace{1em}
+}
+% \abstractcn{摘要正文}{关键词}：居中“摘要”标题（14pt 加粗）+ 正文 + “关键字：”加粗 + 关键词 + 换页
+\newcommand{\abstractcn}[2]{%
+  \thispagestyle{empty}%
+  {\centering {\fontsize{14pt}{17pt}\bfseries 摘要}\par}%
+  \vspace{0.4em}%
+  #1\par
+  \vspace{0.6em}%
+  {\heiti\bfseries 关键字：}#2\par
+  \newpage
+}
+% \tocpage：目录页，标题“目录”居中 17.3pt 黑体加粗，点线引导
+\makeatletter
+\newcommand{\tocpage}{%
+  \setcounter{page}{1}%
+  \begin{center}
+    {\fontsize{17.3pt}{20.8pt}\heiti\bfseries 目录}
+  \end{center}
+  \vspace{0.5em}
+  \@starttoc{toc}%
+  \newpage
+}
+\makeatother
+% \referencescn：参考文献节，标题“参考文献”（不带编号但进目录）
+\newcommand{\referencescn}{%
+  \addcontentsline{toc}{section}{参考文献}%
+  \input{references}%
+}
+% \appendixcn：附录节，标题“附录 A  核心代码”
+\newcommand{\appendixcn}{%
+  \section*{附录 A\quad 核心代码}%
+  \addcontentsline{toc}{section}{附录 A\quad 核心代码}%
+  \input{sections/A_code}%
+}
+% \threelinetable{标题}{列定义}{表头}{表格内容}：三线表，标题在表格上方居中 10.5pt 黑体加粗
+% 调用示例：\threelinetable{表 1 示例}{ccc}{A & B & C}{1 & 2 & 3 \\ 4 & 5 & 6}
+\newcommand{\threelinetable}[4]{%
+  \par\smallskip
+  \begingroup
+    \centering
+    \setlength{\tabcolsep}{3pt}%
+    {\fontsize{10.5pt}{12.6pt}\heiti\bfseries #1}\par
+    \vspace{0.25em}
+    \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}#2@{}}
+      \toprule
+      #3 \\
+      \midrule
+      #4 \\
+      \bottomrule
+    \end{tabular*}
+    \par
+  \endgroup
+  \vspace{0.25em}
+}
+
+\begin{document}
+
+% 封面（不编号）
+\papertitle{基于周期加权预测与场景混合整数规划的微网购电与储能调度策略}
+
+% 摘要页（不编号）
+\abstractcn{%
+微网可在电价低谷充电、高峰放电，在满足小区负载的前提下降低购电费用。本文针对电价与光伏信息逐步丰富的四类场景，建立以电力平衡与储能状态递推为内核、以混合整数线性规划为求解工具的购电与储能调度模型；四个问题共享同一内核，并逐层增加不确定性、日内滚动与电价波动。为刻画跨日储电量的价值，本文提出随季节余弦变化、并由当日场景风险因果调整的终端软区间机制。
+
+针对问题一，在电价、负载与光伏全部已知时建立确定性线性规划，并以引入 0--1 状态变量的混合整数线性规划核验充放电互斥。全天购电费用 35126.95 元，较无储能基准的 48052.05 元节省 26.90\%，弃光量由 6247.96 kWh 降为 0。
+
+针对问题二，采用周期加权预测、整日联合残差场景与季节余弦终端软区间：负荷取最近 4 个同星期、光伏取最近 7 日的指数加权平均（$\rho=0.8$），并从已结算的样本外残差中抽取 100 个场景；日末储电量的季节基准在 6200$\sim$7800 kWh 之间变化，再由当日场景净负荷风险的 80\% 分位数相对其历史中位数的偏离因果调整，形成双侧 $\pm1000$ kWh 的软区间。负荷与光伏预测的 WAPE 分别为 3.89\% 与 6.30\%。334 天的实际总费用为 14637169.37 元，其中紧急购电费 1170588.48 元；相比不设终端约束的方案节省 14472.01 元。
+
+针对问题三，引入附件 3 的官方光伏预报并建立四时点滚动模型，调整费用按上调 1.5 倍电价、下调 50\% 违约价净结算。全部四时点策略全年总费用 14510355.99 元，较仅 0:00 策略节省 351055.72 元（2.36\%），紧急购电量减少 25.40\%。6:00 与 12:00 的更新分别节省 207990.59 元与 140165.02 元，价值显著；18:00 的增益很小，仅节省 2900.11 元。
+
+针对问题四，引入附件 4 的实时波动电价：自相关函数显示整周滞后形成局部峰值（第 7 个整日滞后为 0.9576），据此以最近 4 个同星期、同时刻价格的固定指数加权模型预测电价（WAPE 6.17\%、日内 Spearman 0.9526），并用因果门控的岭回归残差模型作日内更新。问题 4-2 与 4-3 的全年总费用分别为 15529514.78 元与 15393286.54 元，后者较仅 0:00 策略节省 384819.53 元（2.44\%）；价格完全信息下界为 15236867.28 元，价格信息损失仅占 1.03\%。
+
+敏感性分析表明，储能配置与日内滚动调整的经济价值显著且稳健，终端储电量机制与电价预测结构的细微差别不改变主要结论。%
+}{%
+微网调度 \quad 混合整数线性规划 \quad 场景优化 \quad 滚动时域 \quad 周期加权预测 \quad 储能%
+}
+
+% 不设目录页，正文页码从 1 开始
+\setcounter{page}{1}
+
+\input{sections/1_restatement}
+\input{sections/2_assumptions}
+\input{sections/3_symbols}
+\FloatBarrier
+\input{sections/4_problem1}
+\FloatBarrier
+\input{sections/5_problem2}
+\FloatBarrier
+\input{sections/6_problem3}
+\FloatBarrier
+\input{sections/7_problem4}
+\FloatBarrier
+\input{sections/8_sensitivity}
+
+% 参考文献紧接正文排版，不另起新页
+\section*{AI 工具使用声明}
+\addcontentsline{toc}{section}{AI 工具使用声明}
+本参赛队在竞赛过程中使用了 AI 工具，主要用于语言润色、代码调试、论文排版与结构优化等，详细使用情况见支撑材料。
+\vspace{0.5em}
+\referencescn
+\newpage
+\appendixcn
+
+\end{document}

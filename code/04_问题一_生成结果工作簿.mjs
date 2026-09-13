@@ -151,12 +151,6 @@ async function makeSubmission(bundle, method) {
   purchaseSheet.getRange("B2:B145").format.numberFormat = "#,##0.000000";
   storageSheet.getRange("B2:C7").format.numberFormat = "#,##0.000000";
   storageSheet.getRange("E2:E3").format.numberFormat = "#,##0.000000";
-  purchaseSheet.getRange("A:A").format.columnWidth = 20;
-  purchaseSheet.getRange("B:B").format.columnWidth = 18;
-  storageSheet.getRange("A:A").format.columnWidth = 18;
-  storageSheet.getRange("B:C").format.columnWidth = 16;
-  storageSheet.getRange("D:D").format.columnWidth = 12;
-  storageSheet.getRange("E:E").format.columnWidth = 16;
   const outputName = method === "无储能基准"
     ? "问题一_无储能基准_result1提交格式.xlsx"
     : `问题一_${method}_求解结果_result1提交格式.xlsx`;

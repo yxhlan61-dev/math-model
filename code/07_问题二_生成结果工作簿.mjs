@@ -102,14 +102,7 @@ const storageLastRow = storageRows.length + 1;
 storageSheet.getRange(`A2:A${storageLastRow}`).setNumberFormat("yyyy-mm-dd");
 storageSheet.getRange(`C2:D${storageLastRow}`).format.numberFormat = "#,##0.000000";
 storageSheet.getRange(`F2:F${storageLastRow}`).format.numberFormat = "#,##0.000000";
-storageSheet.getRange(`A1:F${storageLastRow}`).format.font = { name: FONT, size: 9, color: "#222222" };
-styleHeader(storageSheet, "A1:F1");
-storageSheet.getRange("A:A").format.columnWidth = 13;
-storageSheet.getRange("B:B").format.columnWidth = 16;
-storageSheet.getRange("C:D").format.columnWidth = 15;
-storageSheet.getRange("E:E").format.columnWidth = 11;
-storageSheet.getRange("F:F").format.columnWidth = 16;
-storageSheet.freezePanes.freezeRows(1);
+storageSheet.getRange(`A2:F${storageLastRow}`).format.font = { name: FONT, size: 9, color: "#222222" };
 
 const emergencyRows = [];
 let priorDate = null;
@@ -126,12 +119,7 @@ if (emergencyRows.length > 0) emergencySheet.getRange("A2").write(emergencyRows)
 const emergencyLastRow = Math.max(2, emergencyRows.length + 1);
 emergencySheet.getRange(`A2:A${emergencyLastRow}`).setNumberFormat("yyyy-mm-dd");
 emergencySheet.getRange(`C2:C${emergencyLastRow}`).format.numberFormat = "#,##0.000000";
-emergencySheet.getRange(`A1:C${emergencyLastRow}`).format.font = { name: FONT, size: 9, color: "#222222" };
-styleHeader(emergencySheet, "A1:C1");
-emergencySheet.getRange("A:A").format.columnWidth = 14;
-emergencySheet.getRange("B:B").format.columnWidth = 24;
-emergencySheet.getRange("C:C").format.columnWidth = 18;
-emergencySheet.freezePanes.freezeRows(1);
+emergencySheet.getRange(`A2:C${emergencyLastRow}`).format.font = { name: FONT, size: 9, color: "#222222" };
 
 submission.recalculate();
 const submissionInspect = await submission.inspect({
